@@ -72,8 +72,80 @@ function prettyDate(value) {
   return Number.isNaN(date.getTime()) ? text : new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short", year: "numeric" }).format(date);
 }
 
+// Nomi base italiani usati dall'integrazione (es. sensor.fuori_sorgenia_numero_bollette):
+// se il nome inglese di DEFAULT_ENTITIES non esiste, si cerca questo, con o senza prefisso area.
+const IT_NAMES = {
+  "sensor.bill_count": "numero_bollette",
+  "sensor.total_remaining_due": "totale_residuo_dovuto",
+  "sensor.latest_electricity_bill_amount": "importo_ultima_bolletta_luce",
+  "sensor.latest_gas_bill_amount": "importo_ultima_bolletta_gas",
+  "sensor.electricity_remaining_due": "residuo_dovuto_luce",
+  "sensor.gas_remaining_due": "residuo_dovuto_gas",
+  "sensor.latest_electricity_bill_due_date": "data_scadenza_ultima_bolletta_luce",
+  "sensor.latest_gas_bill_due_date": "data_scadenza_ultima_bolletta_gas",
+  "sensor.latest_electricity_bill_status": "stato_ultima_bolletta_luce",
+  "sensor.latest_gas_bill_status": "stato_ultima_bolletta_gas",
+  "sensor.latest_electricity_billed_consumption": "ultimo_consumo_fatturato_luce",
+  "sensor.electricity_billed_consumption_total": "totale_consumo_fatturato_luce",
+  "sensor.electricity_billed_consumption_months": "mesi_consumo_fatturato_luce",
+  "sensor.latest_curve_monthly_consumption": "ultimo_consumo_mensile_curva",
+  "sensor.sorgenia_curve_consumption_total": "totale_consumo_curva",
+  "sensor.latest_consumption_band_1": "ultima_fascia_di_consumo_1",
+  "sensor.latest_consumption_band_2": "ultima_fascia_di_consumo_2",
+  "sensor.latest_consumption_band_3": "ultima_fascia_di_consumo_3",
+  "sensor.latest_monthly_peak_power": "ultima_potenza_di_picco_mensile",
+  "sensor.latest_gas_consumption": "ultimo_consumo_gas",
+  "sensor.gas_consumption_total_for_period": "totale_consumi_gas_per_periodo",
+  "sensor.gas_consumption_months": "mesi_consumo_gas",
+  "sensor.latest_gas_monthly_consumption_curve": "ultimo_consumo_mensile_gas_curva",
+  "sensor.gas_curve_consumption_total": "totale_consumo_curva_gas",
+  "sensor.gas_meter_reading": "lettura_contatore_gas",
+  "sensor.gas_meter_reading_date": "data_lettura_contatore_gas",
+  "sensor.latest_electricity_bill_cost_breakdown": "dettaglio_costi_ultima_bolletta_luce",
+  "sensor.latest_gas_bill_cost_breakdown": "dettaglio_costi_ultima_bolletta_gas",
+  "sensor.latest_electricity_all_in_unit_cost": "costo_unitario_tutto_incluso_luce",
+  "sensor.latest_gas_all_in_unit_cost": "costo_unitario_tutto_incluso_gas",
+};
+
+// Se l'entity_id configurato non esiste (es. area assegnata → sensor.fuori_sorgenia_…)
+// cerca l'entità con lo stesso nome base (inglese o italiano) preceduto da un prefisso.
+const _resolvedIds = new Map();
+const _missAt = new Map();
+
+function resolveEntity(hass, entity) {
+  const states = hass?.states;
+  if (!entity || !states) return entity;
+  if (states[entity]) return entity;
+  const cached = _resolvedIds.get(entity);
+  if (cached && states[cached]) return cached;
+  const missed = _missAt.get(entity);
+  if (missed && Date.now() - missed < 10000) return entity;
+
+  const dot = entity.indexOf(".");
+  const domain = entity.slice(0, dot);
+  const bases = [entity.slice(dot + 1)];
+  if (IT_NAMES[entity]) bases.push(IT_NAMES[entity]);
+  const ids = Object.keys(states).filter((id) => id.startsWith(`${domain}.`));
+
+  for (const base of bases) {
+    const matches = ids.filter((id) => {
+      const name = id.slice(domain.length + 1);
+      if (name === base) return true;
+      if (name.length <= base.length || !name.endsWith(base)) return false;
+      const sep = name.charAt(name.length - base.length - 1);
+      return sep === "_" || sep === ".";
+    }).sort((a, b) => a.length - b.length);
+    if (matches.length) {
+      _resolvedIds.set(entity, matches[0]);
+      return matches[0];
+    }
+  }
+  _missAt.set(entity, Date.now());
+  return entity;
+}
+
 function stateValue(hass, entity) {
-  return entity ? hass?.states?.[entity] : undefined;
+  return entity ? hass?.states?.[resolveEntity(hass, entity)] : undefined;
 }
 
 function stateText(hass, entity, unit = "") {
